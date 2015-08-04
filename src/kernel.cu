@@ -12,66 +12,104 @@ void getError(cudaError_t err) {
 }
 
 __global__
-void rgb_invert_all(uchar4* dst, size_t dst_pitch,
-                    uchar4* src, size_t src_pitch,
+void rgb_invert_all(uchar4* mem, size_t mem_pitch,
                     int width, int height){
     int gidx = blockDim.x * blockIdx.x + threadIdx.x;
     int gidy = blockDim.y * blockIdx.y + threadIdx.y;
 
     if((gidx < width) && (gidy < height)){
-        size_t src_pos    = gidx+gidy*src_pitch/sizeof(uchar4);
-        size_t dst_pos    = gidx+gidy*dst_pitch/sizeof(uchar4);
+        size_t mem_pos    = gidx+gidy*mem_pitch/sizeof(uchar4);
+        uchar4 src_pixel = mem[mem_pos];
 
-        uchar4 src_pixel = src[src_pos];
         unsigned char max_rgb = max(src_pixel.x,max(src_pixel.y,src_pixel.z));
         unsigned char min_rgb = min(src_pixel.x,min(src_pixel.y,src_pixel.z));
 
-        dst[dst_pos].x = max_rgb - src_pixel.x + min_rgb;
-        dst[dst_pos].y = max_rgb - src_pixel.y + min_rgb;
-        dst[dst_pos].z = max_rgb - src_pixel.z + min_rgb;
-        dst[dst_pos].w = src_pixel.w;
+        mem[mem_pos].x = max_rgb - src_pixel.x + min_rgb;
+        mem[mem_pos].y = max_rgb - src_pixel.y + min_rgb;
+        mem[mem_pos].z = max_rgb - src_pixel.z + min_rgb;
     }
 }
 
+__global__
+void copy_uchar_array_to_uchar4_dim(uchar4* mem, size_t mem_pitch,
+                                    unsigned char* src,
+                                    int width,int height){
+    int gidx = blockDim.x * blockIdx.x + threadIdx.x;
+    int gidy = blockDim.y * blockIdx.y + threadIdx.y;
 
-// http://on-demand.gputechconf.com/gtc/2014/jp/sessions/4002.pdf
+    if((gidx < width) && (gidy < height)){
+        size_t mem_pos = gidx+gidy*mem_pitch/sizeof(uchar4);
+        size_t src_pos = gidy*width+gidx;
+        mem[mem_pos].x = src[4*src_pos+0];
+        mem[mem_pos].y = src[4*src_pos+1];
+        mem[mem_pos].z = src[4*src_pos+2];
+        mem[mem_pos].w = src[4*src_pos+3];
+    }
+}
+
+__global__
+void copy_uchar4_dim_to_uchar_array(unsigned char* dst,
+                                    uchar4* mem, size_t mem_pitch,
+                                    int width,int height){
+    int gidx = blockDim.x * blockIdx.x + threadIdx.x;
+    int gidy = blockDim.y * blockIdx.y + threadIdx.y;
+
+    if((gidx < width) && (gidy < height)){
+        size_t mem_pos = gidx+gidy*mem_pitch/sizeof(uchar4);
+        size_t dst_pos = gidy*width+gidx;
+        dst[4*dst_pos+0] = mem[mem_pos].x;
+        dst[4*dst_pos+1] = mem[mem_pos].y;
+        dst[4*dst_pos+2] = mem[mem_pos].z;
+        dst[4*dst_pos+3] = mem[mem_pos].w;
+    }
+}
+
 void rgb_invert_in_cuda(unsigned char* dst, unsigned char* src, int width, int height){
-    uchar4* src_uchar;
-    uchar4* dst_uchar;
-    size_t src_pitch, dst_pitch;
+    uchar4* mem_uchar;
+    size_t mem_pitch;
+    unsigned char* uchar_buffer;
     dim3 blockDim(64,2);
     dim3 gridDim(divRoundUp(width, blockDim.x), divRoundUp(height, blockDim.y));
 
-    uchar4* uchar_buffer_in_cpu = (uchar4*)malloc(width*height*sizeof(uchar4));
-    for(int i=0;i<width*height;i++){
-        uchar_buffer_in_cpu[i].x = src[4*i+0];
-        uchar_buffer_in_cpu[i].y = src[4*i+1];
-        uchar_buffer_in_cpu[i].z = src[4*i+2];
-        uchar_buffer_in_cpu[i].w = src[4*i+3];
-    }
+    getError(cudaMalloc(&uchar_buffer,4*sizeof(unsigned char)*width*height));
+    getError(cudaMemcpy(uchar_buffer, src, 4*sizeof(unsigned char)*width*height, cudaMemcpyHostToDevice));
+    getError(cudaMallocPitch(&mem_uchar, &mem_pitch, width*sizeof(uchar4), height));
 
-    getError(cudaMallocPitch(&src_uchar, &src_pitch, width*sizeof(uchar4), height));
-    getError(cudaMallocPitch(&dst_uchar, &dst_pitch, width*sizeof(uchar4), height));
-    getError(cudaMemcpy2D(src_uchar, src_pitch,
-                          uchar_buffer_in_cpu, sizeof(uchar4)*width,
-                          sizeof(uchar4)*width, height,
-                          cudaMemcpyHostToDevice));
-    rgb_invert_all<<<gridDim, blockDim>>>(dst_uchar, dst_pitch,
-                                          src_uchar, src_pitch,
-                                          width, height);
-    getError(cudaMemcpy2D(uchar_buffer_in_cpu, sizeof(uchar4)*width,
-                          dst_uchar, dst_pitch,
-                          sizeof(uchar4)*width, height,
-                          cudaMemcpyDeviceToHost));
+    copy_uchar_array_to_uchar4_dim<<<gridDim, blockDim>>>(mem_uchar, mem_pitch, uchar_buffer, width, height);
+    rgb_invert_all<<<gridDim, blockDim>>>(mem_uchar, mem_pitch, width, height);
+    copy_uchar4_dim_to_uchar_array<<<gridDim, blockDim>>>(uchar_buffer, mem_uchar, mem_pitch, width, height);
+
+    getError(cudaMemcpy(dst, uchar_buffer, 4*sizeof(unsigned char)*width*height, cudaMemcpyDeviceToHost));
     getError(cudaDeviceSynchronize());
+}
 
-    for(int i=0;i<width*height;i++){
-        dst[4*i+0] = uchar_buffer_in_cpu[i].x;
-        dst[4*i+1] = uchar_buffer_in_cpu[i].y;
-        dst[4*i+2] = uchar_buffer_in_cpu[i].z;
-        dst[4*i+3] = uchar_buffer_in_cpu[i].w;
+__global__
+void rgb_invert_all_uchar_array(unsigned char* mem, int width, int height){
+    int gidx = blockDim.x * blockIdx.x + threadIdx.x;
+    int gidy = blockDim.y * blockIdx.y + threadIdx.y;
+
+    if((gidx < width) && (gidy < height)){
+        size_t pos = 4*(gidy*width+gidx);
+
+        unsigned char max_rgb = max(mem[pos],max(mem[pos+1],mem[pos+2]));
+        unsigned char min_rgb = min(mem[pos],min(mem[pos+1],mem[pos+2]));
+
+        mem[pos]   = max_rgb - mem[pos]   + min_rgb;
+        mem[pos+1] = max_rgb - mem[pos+1] + min_rgb;
+        mem[pos+2] = max_rgb - mem[pos+2] + min_rgb;
     }
-    free(uchar_buffer_in_cpu);
+}
+
+void rgb_invert_in_cuda_uchar_array(unsigned char* dst, unsigned char* src, int width, int height){
+    unsigned char* uchar_buffer;
+    dim3 blockDim(64,2);
+    dim3 gridDim(divRoundUp(width, blockDim.x), divRoundUp(height, blockDim.y));
+
+    getError(cudaMalloc(&uchar_buffer,4*sizeof(unsigned char)*width*height));
+    getError(cudaMemcpy(uchar_buffer, src, 4*sizeof(unsigned char)*width*height, cudaMemcpyHostToDevice));
+    rgb_invert_all_uchar_array<<<gridDim, blockDim>>>(uchar_buffer, width, height);
+    getError(cudaMemcpy(dst, uchar_buffer, 4*sizeof(unsigned char)*width*height, cudaMemcpyDeviceToHost));
+    getError(cudaDeviceSynchronize());
 }
 
 // http://on-demand.gputechconf.com/gtc/2014/jp/sessions/4002.pdf

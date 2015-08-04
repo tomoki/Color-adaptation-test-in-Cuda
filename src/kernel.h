@@ -2,6 +2,7 @@
 #define KERNEL_H
 
 void rgb_invert_in_cuda(unsigned char* dst, unsigned char* src, int width, int height);
+void rgb_invert_in_cuda_uchar_array(unsigned char* dst, unsigned char* src, int width, int height);
 void rgb_invert_in_cpu(unsigned char* dst, unsigned char* src, int width, int height);
 
 #endif

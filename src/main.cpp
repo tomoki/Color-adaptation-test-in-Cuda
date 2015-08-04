@@ -37,9 +37,9 @@ int main(int argc, char** argv){
     struct timeval et;
     gettimeofday(&st, NULL);
 
-    
-    rgb_invert_in_cuda(output_image, input_image, width, height);
+    // rgb_invert_in_cuda(output_image, input_image, width, height);
     // rgb_invert_in_cpu(output_image, input_image, width, height);
+    rgb_invert_in_cuda_uchar_array(output_image, input_image, width, height);
 
     gettimeofday(&et, NULL);
     long us = time_diff_us(st, et);
