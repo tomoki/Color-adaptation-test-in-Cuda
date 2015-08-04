@@ -73,3 +73,19 @@ void rgb_invert_in_cuda(unsigned char* dst, unsigned char* src, int width, int h
     }
     free(uchar_buffer_in_cpu);
 }
+
+// http://on-demand.gputechconf.com/gtc/2014/jp/sessions/4002.pdf
+void rgb_invert_in_cpu(unsigned char* dst, unsigned char* src, int width, int height){
+    for(int i=0;i<width*height;i++){
+        unsigned char r = src[4*i+0];
+        unsigned char g = src[4*i+1];
+        unsigned char b = src[4*i+2];
+        unsigned char min_rgb = min(r,min(g,b));
+        unsigned char max_rgb = max(r,max(g,b));
+
+        dst[4*i+0] = max_rgb - r + min_rgb;
+        dst[4*i+1] = max_rgb - g + min_rgb;
+        dst[4*i+2] = max_rgb - b + min_rgb;
+        dst[4*i+3] = src[4*i+3];
+    }
+}

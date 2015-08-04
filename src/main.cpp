@@ -28,6 +28,7 @@ int main(int argc, char** argv){
     unsigned char* output_image = new unsigned char[in_image.size()];
     std::copy(in_image.begin(), in_image.end(), input_image);
     rgb_invert_in_cuda(output_image, input_image, width, height);
+    // rgb_invert_in_cpu(output_image, input_image, width, height);
 
     std::vector<unsigned char> out_image(output_image, output_image+in_image.size());
     unsigned output_error = lodepng::encode(output_file, out_image, width, height);
